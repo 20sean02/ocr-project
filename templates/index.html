@@ -183,6 +183,8 @@
     tr.drag-over-below td { border-bottom: 2px solid var(--accent) !important; }
 
     /* Row delete button */
+    .filename-cell a { color: #5b9bd5; text-decoration: none; cursor: pointer; }
+    .filename-cell a:hover { text-decoration: underline; color: #7bb8f0; }
     .row-del {
       background: none; border: none; cursor: pointer; color: var(--text-dim);
       opacity: 0.4; padding: 2px; display: inline-flex; align-items: center;
@@ -386,9 +388,12 @@
         </svg>
         開始辨識
       </button>
+      <button type="button" class="btn" id="cancel-btn" style="display:none; background:#e74c3c; color:#fff;">
+        取消處理
+      </button>
       <div class="processing" id="processing-msg">
         <div class="spinner"></div>
-        辨識處理中，請稍候... 每張約需數秒
+        <span id="progress-text">辨識處理中，請稍候... 每張約需數秒</span>
       </div>
     </div>
   </div>
@@ -600,7 +605,7 @@ function buildRow(r) {
   tr.innerHTML =
     '<td class="drag-handle">' + GRIP_SVG + '</td>' +
     '<td class="row-num">' + esc(r["工作項目編號"]) + '</td>' +
-    '<td>' + esc(r.original_filename) + '</td>' +
+    '<td class="filename-cell">' + (r._image_file ? '<a href="/images/' + encodeURIComponent(r._image_file) + '" target="_blank" title="點擊查看圖片">' + esc(r.original_filename) + '</a>' : esc(r.original_filename)) + '</td>' +
     '<td class="editable" contenteditable="true" data-field="來文機關">' + esc(r["來文機關"]) + '</td>' +
     '<td class="editable" contenteditable="true" data-field="來文字號">' + esc(r["來文字號"]) + '</td>' +
     '<td class="editable mono" contenteditable="true" data-field="收文文號">' + esc(r["收文文號"]) + '</td>' +
@@ -904,43 +909,87 @@ function doDownload(fmt) {
   .catch(function(err) { showError("匯出失敗：" + err.message); });
 }
 
-// Upload via AJAX
-submitBtn.addEventListener("click", function() {
+// Upload via AJAX — one image at a time (cancellable)
+var cancelRequested = false;
+var cancelBtn = document.getElementById("cancel-btn");
+var progressText = document.getElementById("progress-text");
+
+cancelBtn.addEventListener("click", function() {
+  cancelRequested = true;
+  cancelBtn.disabled = true;
+  cancelBtn.textContent = "正在取消...";
+});
+
+submitBtn.addEventListener("click", async function() {
   if (!fileInput.files || fileInput.files.length === 0) {
     showError("請選擇至少一張圖片");
     return;
   }
-  var formData = new FormData();
-  for (var i = 0; i < fileInput.files.length; i++) {
-    formData.append("files", fileInput.files[i]);
-  }
-  if (currentToken) formData.append("token", currentToken);
+  var files = Array.from(fileInput.files);
+  var total = files.length;
+  var skippedCount = 0;
+  cancelRequested = false;
 
   submitBtn.disabled = true;
+  cancelBtn.style.display = "";
+  cancelBtn.disabled = false;
+  cancelBtn.textContent = "取消處理";
   processingMsg.classList.add("active");
   errorMsg.classList.remove("active");
+  progressText.textContent = "準備處理 " + total + " 張圖片...";
 
-  fetch("/upload", { method: "POST", body: formData })
-    .then(function(resp) {
-      if (!resp.ok) return resp.json().then(function(d) { throw new Error(d.error || "上傳失敗"); });
-      return resp.json();
-    })
-    .then(function(data) {
+  for (var i = 0; i < total; i++) {
+    if (cancelRequested) break;
+
+    progressText.textContent = "處理中 " + (i + 1) + " / " + total + "：" + files[i].name;
+
+    var formData = new FormData();
+    formData.append("file", files[i]);
+    if (currentToken) formData.append("token", currentToken);
+
+    try {
+      var resp = await fetch("/upload_one", { method: "POST", body: formData });
+      if (!resp.ok) {
+        var d = await resp.json();
+        throw new Error(d.error || "上傳失敗");
+      }
+      var data = await resp.json();
       currentToken = data.token;
-      totalSkipped += data.skipped;
+      if (data.skipped) skippedCount++;
+      if (data.row) {
+        tbody.appendChild(buildRow(data.row));
+        resultsSection.classList.add("active");
+      }
+    } catch (err) {
+      showError(files[i].name + "：" + err.message);
+    }
+  }
+
+  // Fetch final sorted/renumbered rows
+  if (currentToken) {
+    try {
+      var finalResp = await fetch("/get_rows/" + currentToken);
+      var finalData = await finalResp.json();
       tbody.innerHTML = "";
-      data.rows.forEach(function(r) { tbody.appendChild(buildRow(r)); });
-      updateBadges(data.ok_count, data.partial_count, data.error_count, totalSkipped);
-      resultsSection.classList.add("active");
-      refreshHistory();  // update append dropdown
-      fileInput.value = "";
-      fileList.textContent = "";
-    })
-    .catch(function(err) { showError(err.message); })
-    .finally(function() {
-      submitBtn.disabled = false;
-      processingMsg.classList.remove("active");
-    });
+      finalData.rows.forEach(function(r) { tbody.appendChild(buildRow(r)); });
+      totalSkipped += skippedCount;
+      updateBadges(finalData.ok_count, finalData.partial_count, finalData.error_count, totalSkipped);
+    } catch (e) {}
+  }
+
+  if (cancelRequested) {
+    showError("已取消，已完成 " + Math.min(i, total) + " / " + total + " 張");
+  } else {
+    showSuccess("全部處理完成！共 " + total + " 張");
+  }
+
+  resultsSection.classList.add("active");
+  refreshHistory();
+  fileInput.value = "";
+  fileList.textContent = "";
+  submitBtn.disabled = false;
+  cancelBtn.style.display = "none";
+  processingMsg.classList.remove("active");
 });
 
 downloadCsvBtn.addEventListener("click", function() { doDownload("csv"); });

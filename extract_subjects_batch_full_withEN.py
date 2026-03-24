@@ -126,8 +126,18 @@ def preprocess_for_ocr(img_gray: np.ndarray, method: str = "gaussian") -> np.nda
 
 
 def ocr(img_gray: np.ndarray, lang: str = "chi_tra", psm: int = 6) -> str:
+    import subprocess
     config = f"--oem 1 --psm {psm}"
-    return pytesseract.image_to_string(img_gray, lang=lang, config=config)
+    # Suppress tesseract stderr debug output
+    old_popen = subprocess.Popen
+    def quiet_popen(*args, **kwargs):
+        kwargs.setdefault("stderr", subprocess.DEVNULL)
+        return old_popen(*args, **kwargs)
+    subprocess.Popen = quiet_popen
+    try:
+        return pytesseract.image_to_string(img_gray, lang=lang, config=config)
+    finally:
+        subprocess.Popen = old_popen
 
 
 def ocr_english_subject(img_gray: np.ndarray) -> str:

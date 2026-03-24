@@ -5,90 +5,18 @@ import os
 import io
 import csv
 import uuid
-import json
-import base64
 import hashlib
-import tempfile
 from datetime import datetime
 
 from flask import Flask, request, render_template, send_file, jsonify
+
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-import anthropic
 
 import extract_subjects_batch_full_withEN as ocrmod
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
-
-# ── LLM fallback for partial OCR results ──────────────────
-_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-if not _ANTHROPIC_KEY:
-    _key_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "API_key.env")
-    if os.path.exists(_key_path):
-        with open(_key_path, "r") as _f:
-            _ANTHROPIC_KEY = _f.read().strip()
-_llm_client = anthropic.Anthropic(api_key=_ANTHROPIC_KEY) if _ANTHROPIC_KEY else None
-
-_LLM_PROMPT = """你是公文 OCR 資料擷取助手。這張圖片是一份台灣政府公文。
-請從圖片中擷取以下欄位，只回傳 JSON，不要多餘文字：
-
-{
-  "來文機關": "發文機關名稱（如：消防局、澎湖縣政府、消防署）",
-  "來文字號": "來文的科室（如：人事室、搶救科、預防科、督企科、火調科、救護科、訓練科、府建商）",
-  "收文文號": "發文字號中的數字編號",
-  "收文日期": "發文日期，格式為 民國年.月.日（如 115.1.13）",
-  "事由": "主旨欄的完整內容"
-}
-
-規則：
-- 來文機關：若文件頂部寫「澎湖縣政府消防局 函」則為「消防局」；若寫「澎湖縣政府 函」則為「澎湖縣政府」；若寫「內政部消防署」則為「消防署」
-- 來文字號：根據發文字號中「澎消X字」的X判斷科室，例如「澎消護字」→「救護科」，「澎消搶字」→「搶救科」，「府建商字」→「府建商」
-- 收文文號：發文字號中「第XXXXXXX號」的數字部分
-- 收文日期：「中華民國115年1月13日」→「115.1.13」
-- 事由：主旨欄的完整內容，到「請查照」為止（含「請查照」），結尾加句號
-- 如果某個欄位確實無法從圖片中辨識，該欄位留空字串 ""
-- 只回傳 JSON，不要 markdown 代碼塊"""
-
-
-def _llm_extract(image_path: str, missing_fields: list) -> dict:
-    """Use Claude vision to extract missing fields from a document image."""
-    if not _llm_client:
-        return {}
-    try:
-        with open(image_path, "rb") as f:
-            img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-
-        ext = os.path.splitext(image_path)[1].lower()
-        media_type = {
-            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-            ".png": "image/png", ".webp": "image/webp",
-            ".gif": "image/gif",
-        }.get(ext, "image/jpeg")
-
-        resp = _llm_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
-                    {"type": "text", "text": _LLM_PROMPT + "\n\n只需要擷取以下欄位：" + "、".join(missing_fields)},
-                ],
-            }],
-        )
-
-        text = resp.content[0].text.strip()
-        # Strip markdown code block if present
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-        return json.loads(text)
-    except Exception as e:
-        print(f"[LLM fallback error] {e}")
-        return {}
 
 # In-memory storage
 RESULTS = {}          # token -> list of row dicts (editable)
@@ -98,6 +26,9 @@ EXPORT_LOG = []       # list of {"filename", "time", "rows", "format"}
 # Server-side export directory
 EXPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv_exports")
 os.makedirs(EXPORT_DIR, exist_ok=True)
+
+IMAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+os.makedirs(IMAGES_DIR, exist_ok=True)
 
 HEADERS = ["工作項目編號", "原始檔名", "來文機關", "來文字號", "收文文號", "收文日期", "事由", "status"]
 FIELD_MAP = [
@@ -241,119 +172,83 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/upload", methods=["POST"])
-def upload():
-    uploaded = request.files.getlist("files")
-    if not uploaded or all(f.filename == "" for f in uploaded):
-        return jsonify({"error": "請選擇至少一張圖片"}), 400
+@app.route("/images/<path:filename>", methods=["GET"])
+def serve_image(filename):
+    safe = os.path.basename(filename)
+    img_path = os.path.join(IMAGES_DIR, safe)
+    if not os.path.isfile(img_path):
+        return "Not found", 404
+    return send_file(img_path)
+
+
+@app.route("/upload_one", methods=["POST"])
+def upload_one():
+    """Process a single image. The frontend calls this once per file so the
+    user can cancel between images."""
+    f = request.files.get("file")
+    if not f or f.filename == "":
+        return jsonify({"error": "缺少圖片"}), 400
 
     token = request.form.get("token", "").strip()
-    existing_rows = []
-    if token and token in RESULTS:
-        existing_rows = RESULTS[token]
-    else:
+    if not token or token not in RESULTS:
         token = uuid.uuid4().hex[:12]
+        RESULTS[token] = []
 
-    new_rows = []
-    skipped = 0
-    existing_hashes = {r.get("_file_hash") for r in existing_rows if r.get("_file_hash")}
+    rows = RESULTS[token]
+    existing_hashes = {r.get("_file_hash") for r in rows if r.get("_file_hash")}
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        saved = []
-        for i, f in enumerate(uploaded):
-            orig = os.path.basename(f.filename) or f"upload_{i}.jpg"
-            file_hash = _hash_file(f)
+    orig = os.path.basename(f.filename) or "upload.jpg"
+    file_hash = _hash_file(f)
 
-            if file_hash in existing_hashes:
-                skipped += 1
-                continue
+    # Duplicate check
+    if file_hash in existing_hashes:
+        return jsonify({"token": token, "skipped": True})
 
-            if file_hash in IMAGE_CACHE:
-                cached = IMAGE_CACHE[file_hash].copy()
-                cached["original_filename"] = orig
-                cached["_file_hash"] = file_hash
-                new_rows.append(cached)
-                existing_hashes.add(file_hash)
-                skipped += 1
-                continue
+    # Cache hit
+    if file_hash in IMAGE_CACHE:
+        cached = IMAGE_CACHE[file_hash].copy()
+        cached["original_filename"] = orig
+        cached["_file_hash"] = file_hash
+        rows.append(cached)
+        _sort_and_renumber(rows)
+        return jsonify({"token": token, "skipped": True, "cached": True,
+                        "row": _safe_row(cached)})
 
-            safe = f"{i:04d}_{orig}"
-            path = os.path.join(tmpdir, safe)
-            f.save(path)
-            saved.append((path, orig, file_hash))
-            existing_hashes.add(file_hash)
+    # Save image to images/ folder for later viewing
+    save_name = f"{file_hash[:10]}_{orig}"
+    save_path = os.path.join(IMAGES_DIR, save_name)
+    f.save(save_path)
 
-        for path, orig_name, file_hash in saved:
-            try:
-                import time as _time
-                _t0 = _time.time()
-                subject, issue_date, laiwen_dept, doc_no, from_agency = ocrmod.process_one(path)
-                _t_ocr = _time.time() - _t0
-                status = "ok" if (subject and from_agency != "N/A" and doc_no and issue_date) else "partial"
-                print(f"[OCR] {orig_name} -> {status} ({_t_ocr:.1f}s)", flush=True)
+    # Process with OCR
+    try:
+        subject, issue_date, laiwen_dept, doc_no, from_agency = ocrmod.process_one(save_path)
+        status = "ok" if (subject and from_agency != "N/A" and doc_no and issue_date) else "partial"
+        row = {
+            "original_filename": orig,
+            "來文機關": from_agency or "N/A",
+            "來文字號": laiwen_dept or "N/A",
+            "收文文號": doc_no or "",
+            "收文日期": issue_date or "",
+            "事由": subject or "",
+            "status": status,
+            "_sort_key": ocrmod.parse_roc_date_to_sort_key(issue_date),
+            "_file_hash": file_hash,
+            "_image_file": save_name,
+        }
+    except Exception as e:
+        row = {
+            "original_filename": orig,
+            "來文機關": "N/A", "來文字號": "N/A",
+            "收文文號": "", "收文日期": "", "事由": "",
+            "status": f"error: {e}",
+            "_sort_key": (1, 0, 0, 0),
+            "_file_hash": file_hash,
+            "_image_file": save_name,
+        }
 
-                # LLM fallback for partial results
-                if status == "partial":
-                    missing = []
-                    if not subject:
-                        missing.append("事由")
-                    if not from_agency or from_agency == "N/A":
-                        missing.append("來文機關")
-                    if not laiwen_dept or laiwen_dept == "N/A":
-                        missing.append("來文字號")
-                    if not doc_no:
-                        missing.append("收文文號")
-                    if not issue_date:
-                        missing.append("收文日期")
-
-                    if missing:
-                        print(f"[LLM] {orig_name} missing: {missing}", flush=True)
-                        _t1 = _time.time()
-                        llm_data = _llm_extract(path, missing)
-                        print(f"[LLM] {orig_name} done ({_time.time() - _t1:.1f}s)", flush=True)
-                        if llm_data:
-                            if not subject and llm_data.get("事由"):
-                                subject = llm_data["事由"]
-                            if (not from_agency or from_agency == "N/A") and llm_data.get("來文機關"):
-                                from_agency = llm_data["來文機關"]
-                            if (not laiwen_dept or laiwen_dept == "N/A") and llm_data.get("來文字號"):
-                                laiwen_dept = llm_data["來文字號"]
-                            if not doc_no and llm_data.get("收文文號"):
-                                doc_no = llm_data["收文文號"]
-                            if not issue_date and llm_data.get("收文日期"):
-                                issue_date = llm_data["收文日期"]
-                            # Re-evaluate status
-                            status = "ok" if (subject and from_agency != "N/A" and doc_no and issue_date) else "partial"
-
-                row = {
-                    "original_filename": orig_name,
-                    "來文機關": from_agency or "N/A",
-                    "來文字號": laiwen_dept or "N/A",
-                    "收文文號": doc_no or "",
-                    "收文日期": issue_date or "",
-                    "事由": subject or "",
-                    "status": status,
-                    "_sort_key": ocrmod.parse_roc_date_to_sort_key(issue_date),
-                    "_file_hash": file_hash,
-                }
-                new_rows.append(row)
-                IMAGE_CACHE[file_hash] = row.copy()
-            except Exception as e:
-                new_rows.append({
-                    "original_filename": orig_name,
-                    "來文機關": "N/A",
-                    "來文字號": "N/A",
-                    "收文文號": "",
-                    "收文日期": "",
-                    "事由": "",
-                    "status": f"error: {e}",
-                    "_sort_key": (1, 0, 0, 0),
-                    "_file_hash": file_hash,
-                })
-
-    all_rows = existing_rows + new_rows
-    _sort_and_renumber(all_rows)
-    RESULTS[token] = all_rows
+    rows.append(row)
+    IMAGE_CACHE[file_hash] = row.copy()
+    _sort_and_renumber(rows)
 
     if len(RESULTS) > 20:
         oldest = list(RESULTS.keys())[0]
@@ -363,32 +258,40 @@ def upload():
         for k in keys[:250]:
             del IMAGE_CACHE[k]
 
-    ok_count = sum(1 for r in all_rows if r.get("status") == "ok")
-    partial_count = sum(1 for r in all_rows if r.get("status") == "partial")
-    error_count = sum(1 for r in all_rows if r.get("status", "").startswith("error"))
+    return jsonify({"token": token, "skipped": False, "row": _safe_row(row)})
 
-    safe_rows = []
-    for r in all_rows:
-        safe_rows.append({
-            "工作項目編號": r.get("工作項目編號", ""),
-            "original_filename": r.get("original_filename", ""),
-            "來文機關": r.get("來文機關", "N/A"),
-            "來文字號": r.get("來文字號", "N/A"),
-            "收文文號": r.get("收文文號", ""),
-            "收文日期": r.get("收文日期", ""),
-            "事由": r.get("事由", ""),
-            "status": r.get("status", ""),
-            "_file_hash": r.get("_file_hash", ""),
-        })
 
+def _safe_row(r):
+    """Return a row dict safe for JSON (no tuple sort keys)."""
+    return {
+        "工作項目編號": r.get("工作項目編號", ""),
+        "original_filename": r.get("original_filename", ""),
+        "來文機關": r.get("來文機關", "N/A"),
+        "來文字號": r.get("來文字號", "N/A"),
+        "收文文號": r.get("收文文號", ""),
+        "收文日期": r.get("收文日期", ""),
+        "事由": r.get("事由", ""),
+        "status": r.get("status", ""),
+        "_file_hash": r.get("_file_hash", ""),
+        "_image_file": r.get("_image_file", ""),
+    }
+
+
+@app.route("/get_rows/<token>", methods=["GET"])
+def get_rows(token):
+    """Return all current rows for a token (used after processing to get
+    renumbered results)."""
+    rows = RESULTS.get(token)
+    if rows is None:
+        return jsonify({"error": "token not found"}), 404
+    safe_rows = [_safe_row(r) for r in rows]
+    ok_count = sum(1 for r in rows if r.get("status") == "ok")
+    partial_count = sum(1 for r in rows if r.get("status") == "partial")
+    error_count = sum(1 for r in rows if r.get("status", "").startswith("error"))
     return jsonify({
-        "token": token,
-        "rows": safe_rows,
-        "ok_count": ok_count,
-        "partial_count": partial_count,
+        "token": token, "rows": safe_rows,
+        "ok_count": ok_count, "partial_count": partial_count,
         "error_count": error_count,
-        "skipped": skipped,
-        "new_count": len(new_rows),
     })
 
 
