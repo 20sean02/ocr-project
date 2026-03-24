@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: ocr-project
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.10"
