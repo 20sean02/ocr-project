@@ -547,5 +547,47 @@ def rename_export(filename):
     return jsonify({"ok": True, "new_name": new_name})
 
 
+@app.route("/import_csv", methods=["POST"])
+def import_csv():
+    """Import a previously exported CSV to restore session data."""
+    f = request.files.get("file")
+    if not f or f.filename == "":
+        return jsonify({"error": "缺少 CSV 檔案"}), 400
+    if not f.filename.lower().endswith(".csv"):
+        return jsonify({"error": "只支援 CSV 檔案"}), 400
+
+    try:
+        content = f.read().decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(content))
+        rows = []
+        for r in reader:
+            row = {
+                "工作項目編號": r.get("工作項目編號", ""),
+                "original_filename": r.get("原始檔名", ""),
+                "來文機關": r.get("來文機關", "N/A"),
+                "來文字號": r.get("來文字號", "N/A"),
+                "收文文號": r.get("收文文號", ""),
+                "收文日期": r.get("收文日期", ""),
+                "事由": r.get("事由", ""),
+                "status": r.get("status", "imported"),
+                "_sort_key": ocrmod.parse_roc_date_to_sort_key(r.get("收文日期", "")),
+                "_file_hash": "",
+                "_image_file": "",
+            }
+            rows.append(row)
+
+        if not rows:
+            return jsonify({"error": "CSV 檔案沒有資料"}), 400
+
+        token = uuid.uuid4().hex[:12]
+        _sort_and_renumber(rows)
+        RESULTS[token] = rows
+
+        safe_rows = [_safe_row(r) for r in rows]
+        return jsonify({"token": token, "rows": safe_rows, "count": len(rows)})
+    except Exception as e:
+        return jsonify({"error": f"讀取 CSV 失敗：{e}"}), 400
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5050, debug=True)
