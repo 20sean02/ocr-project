@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>公文 OCR 辨識系統</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-2: #232734;
+      --border: #2e3344;
+      --text: #e4e6f0;
+      --text-dim: #8b8fa3;
+      --accent: #6c8cff;
+      --accent-glow: rgba(108, 140, 255, 0.15);
+      --accent-hover: #8ba4ff;
+      --green: #34d399;
+      --green-dim: rgba(52, 211, 153, 0.12);
+      --yellow: #fbbf24;
+      --yellow-dim: rgba(251, 191, 36, 0.12);
+      --red: #f87171;
+      --red-dim: rgba(248, 113, 113, 0.12);
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Microsoft JhengHei", "SF Pro Display", system-ui, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+    }
+    .header {
+      border-bottom: 1px solid var(--border); padding: 20px 0;
+      background: linear-gradient(180deg, #161824 0%, var(--bg) 100%);
+    }
+    .header-inner {
+      max-width: 1280px; margin: 0 auto; padding: 0 28px;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .logo {
+      width: 38px; height: 38px; border-radius: 10px;
+      background: linear-gradient(135deg, #6c8cff 0%, #a78bfa 100%);
+      display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
+    }
+    .header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+    .header p { font-size: 0.85rem; color: var(--text-dim); margin-top: 2px; }
+    .main { max-width: 1280px; margin: 0 auto; padding: 28px; }
+
+    .upload-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px; margin-bottom: 28px;
+    }
+    .dropzone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 48px 24px; text-align: center; transition: all 0.3s; cursor: pointer; position: relative;
+    }
+    .dropzone:hover, .dropzone.drag-over { border-color: var(--accent); background: var(--accent-glow); }
+    .dropzone-icon {
+      width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 14px;
+      background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 24px;
+    }
+    .dropzone h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 6px; }
+    .dropzone p { font-size: 0.85rem; color: var(--text-dim); }
+    .dropzone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .file-list { margin-top: 16px; font-size: 0.85rem; color: var(--accent); min-height: 20px; }
+    .upload-actions { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 28px; border: none; border-radius: 8px;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer;
+      text-decoration: none; transition: all 0.2s; letter-spacing: -0.01em;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #6c8cff 0%, #8b6cff 100%);
+      color: #fff; box-shadow: 0 2px 12px rgba(108, 140, 255, 0.3);
+    }
+    .btn-primary:hover { box-shadow: 0 4px 20px rgba(108, 140, 255, 0.45); transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-download {
+      background: var(--green); color: #0f1117;
+      box-shadow: 0 2px 12px rgba(52, 211, 153, 0.25);
+    }
+    .btn-download:hover { box-shadow: 0 4px 20px rgba(52, 211, 153, 0.4); transform: translateY(-1px); }
+    .btn-xlsx {
+      background: linear-gradient(135deg, #34d399 0%, #2dd4bf 100%); color: #0f1117;
+      box-shadow: 0 2px 12px rgba(45, 212, 191, 0.25);
+    }
+    .btn-xlsx:hover { box-shadow: 0 4px 20px rgba(45, 212, 191, 0.4); transform: translateY(-1px); }
+    .btn-download svg, .btn-xlsx svg, .btn-primary svg { width: 18px; height: 18px; }
+    .btn-reset {
+      background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+    }
+    .btn-reset:hover { color: var(--red); border-color: var(--red); }
+    .btn-sm { padding: 6px 14px; font-size: 0.8rem; border-radius: 6px; }
+
+    .processing { display: none; align-items: center; gap: 10px; color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+    .processing.active { display: flex; }
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2.5px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .results-section { display: none; }
+    .results-section.active { display: block; }
+
+    .results-header {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
+    }
+    .results-header .left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .results-header .right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .results-title { font-size: 1.1rem; font-weight: 700; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+    }
+    .badge-ok { background: var(--green-dim); color: var(--green); }
+    .badge-partial { background: var(--yellow-dim); color: var(--yellow); }
+    .badge-error { background: var(--red-dim); color: var(--red); }
+    .badge-skip { background: var(--accent-glow); color: var(--accent); }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    .edit-hint {
+      font-size: 0.82rem; color: var(--text-dim); margin-bottom: 12px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .edit-hint svg { width: 15px; height: 15px; opacity: 0.6; }
+
+    .table-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    thead { position: sticky; top: 0; z-index: 1; }
+    th {
+      background: var(--surface-2); color: var(--text-dim);
+      padding: 12px 16px; text-align: left; white-space: nowrap;
+      font-weight: 600; font-size: 0.78rem; text-transform: uppercase;
+      letter-spacing: 0.04em; border-bottom: 1px solid var(--border);
+    }
+    td { padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tbody tr { transition: background 0.15s; }
+    tbody tr:hover { background: var(--accent-glow); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    td.editable { cursor: text; position: relative; }
+    td.editable:hover { background: rgba(108, 140, 255, 0.08); }
+    td.editable:focus {
+      outline: 2px solid var(--accent); outline-offset: -2px;
+      background: rgba(108, 140, 255, 0.1); border-radius: 4px;
+    }
+    td.editable.edited::after {
+      content: ""; position: absolute; top: 6px; right: 6px;
+      width: 6px; height: 6px; border-radius: 50%; background: var(--yellow);
+    }
+    td.subject { max-width: 420px; line-height: 1.5; color: var(--text); }
+    td.mono { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.82rem; color: var(--text-dim); }
+    .status-pill {
+      display: inline-block; padding: 3px 10px; border-radius: 6px;
+      font-size: 0.78rem; font-weight: 600;
+    }
+    .status-pill.ok { background: var(--green-dim); color: var(--green); }
+    .status-pill.partial { background: var(--yellow-dim); color: var(--yellow); }
+    .status-pill.error { background: var(--red-dim); color: var(--red); }
+    .row-num { color: var(--text-dim); font-family: "SF Mono", monospace; font-size: 0.8rem; }
+
+    @keyframes rowFadeIn { from { background: rgba(108, 140, 255, 0.2); } to { background: transparent; } }
+    tr.new-row { animation: rowFadeIn 1.5s ease-out; }
+
+    /* Drag reorder */
+    .drag-handle {
+      cursor: grab; color: var(--text-dim); opacity: 0.5; text-align: center;
+      padding: 8px 6px !important; width: 28px; user-select: none;
+    }
+    .drag-handle:hover { opacity: 1; color: var(--accent); }
+    .drag-handle:active { cursor: grabbing; }
+    .drag-handle svg { width: 16px; height: 16px; vertical-align: middle; pointer-events: none; }
+    tr.dragging { opacity: 0.3; }
+    tr.drag-over-above td { border-top: 2px solid var(--accent) !important; }
+    tr.drag-over-below td { border-bottom: 2px solid var(--accent) !important; }
+
+    /* Row delete button */
+    .row-del {
+      background: none; border: none; cursor: pointer; color: var(--text-dim);
+      opacity: 0.4; padding: 2px; display: inline-flex; align-items: center;
+      transition: all 0.15s; border-radius: 4px;
+    }
+    .row-del:hover { opacity: 1; color: var(--red); background: var(--red-dim); }
+    .row-del svg { width: 14px; height: 14px; pointer-events: none; }
+
+    .error-msg {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 2000;
+      background: var(--red-dim); color: var(--red); border: 1px solid rgba(248,113,113,0.2);
+      padding: 14px 24px; border-radius: var(--radius); font-weight: 500;
+      display: none; max-width: 600px; width: 90%; text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      animation: toastIn 0.3s ease-out;
+    }
+    .error-msg.active { display: block; }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+    /* Export history */
+    .history-section {
+      margin-top: 28px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px;
+    }
+    .history-title {
+      font-size: 1rem; font-weight: 700; margin-bottom: 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .history-title svg { width: 18px; height: 18px; color: var(--text-dim); }
+    .history-empty { font-size: 0.85rem; color: var(--text-dim); }
+    .history-list { list-style: none; }
+    .history-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-radius: 8px; transition: background 0.15s;
+      gap: 12px;
+    }
+    .history-item:hover { background: var(--surface-2); }
+    .history-item + .history-item { border-top: 1px solid var(--border); }
+    .history-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+    .history-actions {
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    .history-actions button {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text-dim); cursor: pointer; padding: 5px 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .history-actions button:hover { border-color: var(--accent); color: var(--accent); }
+    .history-actions button.del:hover { border-color: var(--red); color: var(--red); }
+    .history-actions button svg { width: 14px; height: 14px; }
+    .history-name-edit {
+      background: var(--surface-2); border: 1px solid var(--accent); border-radius: 6px;
+      color: var(--text); font-family: "SF Mono", monospace; font-size: 0.84rem;
+      padding: 4px 8px; outline: none; width: 100%; min-width: 200px;
+    }
+    .history-format {
+      font-size: 0.72rem; font-weight: 700; padding: 3px 8px; border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .history-format.CSV { background: var(--accent-glow); color: var(--accent); }
+    .history-format.XLSX { background: var(--green-dim); color: var(--green); }
+    .append-section {
+      margin-top: 16px; padding: 16px; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: 8px;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .append-section label { font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+    .append-select {
+      flex: 1; min-width: 200px; padding: 8px 12px; border-radius: 6px;
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      font-family: "SF Mono", monospace; font-size: 0.84rem; outline: none;
+    }
+    .append-select:focus { border-color: var(--accent); }
+    .btn-append {
+      background: linear-gradient(135deg, #a78bfa 0%, #8b6cff 100%); color: #fff;
+      box-shadow: 0 2px 12px rgba(167, 139, 250, 0.3);
+    }
+    .btn-append:hover { box-shadow: 0 4px 20px rgba(167, 139, 250, 0.45); transform: translateY(-1px); }
+    .btn-append:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    /* Preview modal */
+    .preview-overlay {
+      display: none; position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.7); align-items: center; justify-content: center;
+    }
+    .preview-overlay.active { display: flex; }
+    .preview-modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      width: 90vw; max-width: 1100px; max-height: 85vh; display: flex; flex-direction: column;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .preview-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+    .preview-header h3 { font-size: 1rem; font-weight: 700; }
+    .preview-close {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text-dim); cursor: pointer; padding: 6px 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .preview-close:hover { border-color: var(--red); color: var(--red); }
+    .preview-close svg { width: 16px; height: 16px; }
+    .preview-body { overflow: auto; flex: 1; padding: 0; }
+    .preview-body table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    .preview-body th {
+      background: var(--surface-2); color: var(--text-dim); padding: 10px 14px;
+      text-align: left; font-weight: 600; font-size: 0.76rem; text-transform: uppercase;
+      letter-spacing: 0.04em; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 1;
+    }
+    .preview-body td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .preview-body tbody tr:hover { background: var(--accent-glow); }
+    .preview-body tbody tr:last-child td { border-bottom: none; }
+    .preview-body .subject-col { max-width: 380px; line-height: 1.45; }
+    .preview-body .mono-col { font-family: "SF Mono", monospace; font-size: 0.8rem; color: var(--text-dim); }
+    .preview-loading { padding: 40px; text-align: center; color: var(--text-dim); }
+
+    .preview-body td.p-editable { cursor: text; position: relative; }
+    .preview-body td.p-editable:hover { background: rgba(108, 140, 255, 0.08); }
+    .preview-body td.p-editable:focus {
+      outline: 2px solid var(--accent); outline-offset: -2px;
+      background: rgba(108, 140, 255, 0.1); border-radius: 4px;
+    }
+    .preview-body td.p-editable.p-edited::after {
+      content: ""; position: absolute; top: 5px; right: 5px;
+      width: 5px; height: 5px; border-radius: 50%; background: var(--yellow);
+    }
+    .preview-actions {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .preview-actions .btn { padding: 7px 16px; font-size: 0.82rem; }
+    .preview-edit-hint {
+      font-size: 0.78rem; color: var(--text-dim); padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .preview-edit-hint svg { width: 13px; height: 13px; opacity: 0.6; }
+
+    .history-actions button.preview { }
+    .history-actions button.preview:hover { border-color: var(--accent); color: var(--accent); }
+    .history-actions button.dl-csv, .history-actions button.dl-xlsx { font-size: 0.7rem; font-weight: 600; padding: 4px 8px; }
+    .history-actions button.dl-csv:hover { border-color: var(--green); color: var(--green); }
+    .history-actions button.dl-xlsx:hover { border-color: var(--green); color: var(--green); }
+
+    .history-name {
+      font-size: 0.84rem; font-family: "SF Mono", monospace; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .history-meta { font-size: 0.78rem; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+
+    .footer { text-align: center; padding: 32px 0 20px; font-size: 0.78rem; color: var(--text-dim); }
+
+    @media (max-width: 640px) {
+      .main { padding: 16px; }
+      .dropzone { padding: 32px 16px; }
+      .results-header { flex-direction: column; align-items: flex-start; }
+      td.subject { max-width: 260px; }
+      .history-item { flex-direction: column; align-items: flex-start; gap: 6px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#fff" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+    </div>
+    <div>
+      <h1>公文 OCR 辨識系統</h1>
+      <p>上傳公文圖片，自動辨識欄位並匯出 CSV / Excel</p>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+  <div class="error-msg" id="error-msg"></div>
+
+  <div class="upload-card">
+    <div class="dropzone" id="dropzone">
+      <input type="file" name="files" multiple accept="image/*" id="file-input">
+      <div class="dropzone-icon">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+      </div>
+      <h3>拖曳圖片到這裡，或點擊選擇檔案</h3>
+      <p>支援 JPG、PNG 等圖片格式，可多選（重複圖片會自動跳過）</p>
+    </div>
+    <div class="file-list" id="file-list"></div>
+    <div class="upload-actions">
+      <button type="button" class="btn btn-primary" id="submit-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+        </svg>
+        開始辨識
+      </button>
+      <div class="processing" id="processing-msg">
+        <div class="spinner"></div>
+        辨識處理中，請稍候... 每張約需數秒
+      </div>
+    </div>
+  </div>
+
+  <div class="results-section" id="results-section">
+    <div class="results-header">
+      <div class="left">
+        <span class="results-title">辨識結果</span>
+        <span class="badge badge-ok" id="badge-ok"></span>
+        <span class="badge badge-partial" id="badge-partial" style="display:none"></span>
+        <span class="badge badge-error" id="badge-error" style="display:none"></span>
+        <span class="badge badge-skip" id="badge-skip" style="display:none"></span>
+      </div>
+      <div class="right">
+        <button type="button" class="btn btn-reset" id="reset-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/>
+          </svg>
+          清除全部
+        </button>
+        <button type="button" class="btn btn-download" id="download-csv-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+          </svg>
+          下載 CSV
+        </button>
+        <button type="button" class="btn btn-xlsx" id="download-xlsx-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+          </svg>
+          下載 Excel
+        </button>
+      </div>
+    </div>
+
+    <!-- Append to existing CSV -->
+    <div class="append-section" id="append-section" style="display:none">
+      <label>附加到現有檔案：</label>
+      <select class="append-select" id="append-select">
+        <option value="">-- 選擇 CSV 檔案 --</option>
+      </select>
+      <button type="button" class="btn btn-append btn-sm" id="append-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        附加到選定檔案
+      </button>
+    </div>
+
+    <div class="edit-hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/>
+      </svg>
+      點擊欄位可直接編輯，拖曳左側把手可調整順序，可繼續上傳更多圖片
+    </div>
+
+    <div class="table-card">
+      <div class="table-scroll">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th style="width:28px"></th>
+              <th>#</th>
+              <th>檔名</th>
+              <th>來文機關</th>
+              <th>來文字號</th>
+              <th>收文文號</th>
+              <th>收文日期</th>
+              <th>事由</th>
+              <th>狀態</th>
+              <th style="width:32px"></th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export history -->
+  <div class="history-section" id="history-section">
+    <div class="history-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      匯出紀錄
+    </div>
+    <ul class="history-list" id="history-list">
+      <li class="history-empty" id="history-empty">尚無匯出紀錄</li>
+    </ul>
+  </div>
+
+  <!-- Preview modal -->
+  <div class="preview-overlay" id="preview-overlay">
+    <div class="preview-modal">
+      <div class="preview-header">
+        <h3 id="preview-title">預覽</h3>
+        <div class="preview-actions">
+          <button class="btn btn-download btn-sm" id="preview-save" style="display:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
+            </svg>
+            儲存修改
+          </button>
+          <button class="btn btn-sm" id="preview-dl-csv" style="background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border)">CSV</button>
+          <button class="btn btn-sm" id="preview-dl-xlsx" style="background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border)">Excel</button>
+          <button class="preview-close" id="preview-close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="preview-body" id="preview-body">
+        <div class="preview-loading">載入中...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">公文 OCR 辨識系統 &mdash; Tesseract + OpenCV</div>
+</div>
+
+<script>
+var dropzone = document.getElementById("dropzone");
+var fileInput = document.getElementById("file-input");
+var fileList = document.getElementById("file-list");
+var submitBtn = document.getElementById("submit-btn");
+var processingMsg = document.getElementById("processing-msg");
+var resultsSection = document.getElementById("results-section");
+var tbody = document.getElementById("results-tbody");
+var errorMsg = document.getElementById("error-msg");
+var downloadCsvBtn = document.getElementById("download-csv-btn");
+var downloadXlsxBtn = document.getElementById("download-xlsx-btn");
+var resetBtn = document.getElementById("reset-btn");
+var appendSection = document.getElementById("append-section");
+var appendSelect = document.getElementById("append-select");
+var appendBtn = document.getElementById("append-btn");
+var historyList = document.getElementById("history-list");
+var historyEmpty = document.getElementById("history-empty");
+var previewOverlay = document.getElementById("preview-overlay");
+var previewBody = document.getElementById("preview-body");
+var previewTitle = document.getElementById("preview-title");
+var previewClose = document.getElementById("preview-close");
+var previewSave = document.getElementById("preview-save");
+var previewDlCsv = document.getElementById("preview-dl-csv");
+var previewDlXlsx = document.getElementById("preview-dl-xlsx");
+var previewFilename = "";  // track which file is being previewed
+var previewHasEdits = false;
+
+var currentToken = null;
+var totalSkipped = 0;
+
+// Drag & drop
+["dragenter","dragover"].forEach(function(e) {
+  dropzone.addEventListener(e, function(ev) { ev.preventDefault(); dropzone.classList.add("drag-over"); });
+});
+["dragleave","drop"].forEach(function(e) {
+  dropzone.addEventListener(e, function(ev) { ev.preventDefault(); dropzone.classList.remove("drag-over"); });
+});
+dropzone.addEventListener("drop", function(ev) {
+  fileInput.files = ev.dataTransfer.files;
+  showFiles(fileInput.files);
+});
+
+fileInput.addEventListener("change", function() { showFiles(this.files); });
+function showFiles(files) {
+  if (files.length === 0) { fileList.textContent = ""; return; }
+  fileList.textContent = files.length + " 個檔案已選取：" +
+    Array.from(files).map(function(f) { return f.name; }).join("、");
+}
+
+function showError(msg) {
+  errorMsg.style.background = "var(--red-dim)";
+  errorMsg.style.color = "var(--red)";
+  errorMsg.style.borderColor = "rgba(248,113,113,0.2)";
+  errorMsg.textContent = msg;
+  errorMsg.classList.add("active");
+  setTimeout(function() { errorMsg.classList.remove("active"); }, 5000);
+}
+
+function showSuccess(msg) {
+  errorMsg.style.background = "var(--green-dim)";
+  errorMsg.style.color = "var(--green)";
+  errorMsg.style.borderColor = "rgba(52,211,153,0.2)";
+  errorMsg.textContent = msg;
+  errorMsg.classList.add("active");
+  setTimeout(function() { errorMsg.classList.remove("active"); }, 5000);
+}
+
+function esc(s) {
+  if (!s) return "";
+  var d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function statusClass(s) {
+  if (s.startsWith("error")) return "error";
+  return s;
+}
+
+var GRIP_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>';
+var TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21a48.108 48.108 0 00-3.478-.397m-12 .562a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>';
+
+function buildRow(r) {
+  var tr = document.createElement("tr");
+  tr.dataset.hash = r._file_hash || "";
+  var st = statusClass(r.status);
+  tr.innerHTML =
+    '<td class="drag-handle">' + GRIP_SVG + '</td>' +
+    '<td class="row-num">' + esc(r["工作項目編號"]) + '</td>' +
+    '<td>' + esc(r.original_filename) + '</td>' +
+    '<td class="editable" contenteditable="true" data-field="來文機關">' + esc(r["來文機關"]) + '</td>' +
+    '<td class="editable" contenteditable="true" data-field="來文字號">' + esc(r["來文字號"]) + '</td>' +
+    '<td class="editable mono" contenteditable="true" data-field="收文文號">' + esc(r["收文文號"]) + '</td>' +
+    '<td class="editable mono" contenteditable="true" data-field="收文日期">' + esc(r["收文日期"]) + '</td>' +
+    '<td class="editable subject" contenteditable="true" data-field="事由">' + esc(r["事由"]) + '</td>' +
+    '<td><span class="status-pill ' + st + '">' + esc(r.status) + '</span></td>' +
+    '<td><button class="row-del" title="刪除此列">' + TRASH_SVG + '</button></td>';
+  tr.querySelectorAll("td.editable").forEach(function(td) {
+    var orig = td.textContent.trim();
+    td.addEventListener("input", function() {
+      td.classList.toggle("edited", td.textContent.trim() !== orig);
+    });
+  });
+  tr.querySelector(".row-del").addEventListener("click", function() {
+    tr.remove();
+    renumberRows(tbody);
+  });
+  return tr;
+}
+
+function updateBadges(ok, partial, err, skip) {
+  document.getElementById("badge-ok").textContent = ok + " 成功";
+  var bp = document.getElementById("badge-partial");
+  bp.textContent = partial + " 部分"; bp.style.display = partial ? "" : "none";
+  var be = document.getElementById("badge-error");
+  be.textContent = err + " 失敗"; be.style.display = err ? "" : "none";
+  var bs = document.getElementById("badge-skip");
+  bs.textContent = skip + " 跳過（重複）"; bs.style.display = skip ? "" : "none";
+}
+
+function collectRows() {
+  var trs = tbody.querySelectorAll("tr");
+  var rows = [];
+  trs.forEach(function(tr) {
+    var row = {};
+    row["工作項目編號"] = tr.querySelector(".row-num").textContent.trim();
+    row["original_filename"] = tr.children[2].textContent.trim();
+    row["_file_hash"] = tr.dataset.hash || "";
+    tr.querySelectorAll("td.editable").forEach(function(td) {
+      row[td.dataset.field] = td.textContent.trim();
+    });
+    var pill = tr.querySelector(".status-pill");
+    row["status"] = pill ? pill.textContent.trim() : "";
+    rows.push(row);
+  });
+  return rows;
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function buildHistoryItem(f) {
+  var li = document.createElement("li");
+  li.className = "history-item";
+  li.dataset.filename = f.filename;
+
+  li.innerHTML =
+    '<div class="history-info">' +
+      '<span class="history-format ' + esc(f.format) + '">' + esc(f.format) + '</span>' +
+      '<span class="history-name">' + esc(f.filename) + '</span>' +
+    '</div>' +
+    '<span class="history-meta">' + esc(f.time) + ' &middot; ' + formatSize(f.size) + '</span>' +
+    '<div class="history-actions">' +
+      (f.format === "CSV" ? '<button class="preview" title="預覽/編輯"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>' : '') +
+      '<button class="dl-csv" title="下載 CSV">CSV</button>' +
+      '<button class="dl-xlsx" title="下載 Excel">XLSX</button>' +
+      '<button class="rename" title="重新命名">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>' +
+      '</button>' +
+      '<button class="del" title="刪除">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>' +
+      '</button>' +
+    '</div>';
+
+  // Rename handler
+  li.querySelector(".rename").addEventListener("click", function(e) {
+    e.preventDefault();
+    var currentName = li.dataset.filename;
+    var nameEl = li.querySelector(".history-name");
+    var origText = nameEl.textContent;
+
+    // Replace name link with input
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "history-name-edit";
+    input.value = origText;
+    nameEl.replaceWith(input);
+    input.focus();
+    // Select name without extension
+    var dotIdx = input.value.lastIndexOf(".");
+    if (dotIdx > 0) input.setSelectionRange(0, dotIdx);
+
+    function doRename() {
+      var newName = input.value.trim();
+      if (!newName || newName === origText) {
+        // Cancel — restore link
+        var a = document.createElement("a");
+        a.href = "/exports/" + encodeURIComponent(currentName);
+        a.className = "history-name";
+        a.textContent = origText;
+        input.replaceWith(a);
+        return;
+      }
+      fetch("/exports/" + encodeURIComponent(currentName) + "/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_name: newName })
+      })
+      .then(function(resp) {
+        if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
+        return resp.json();
+      })
+      .then(function(data) {
+        li.dataset.filename = data.new_name;
+        var a = document.createElement("a");
+        a.href = "/exports/" + encodeURIComponent(data.new_name);
+        a.className = "history-name";
+        a.textContent = data.new_name;
+        input.replaceWith(a);
+      })
+      .catch(function(err) {
+        showError("重新命名失敗: " + err.message);
+        var a = document.createElement("a");
+        a.href = "/exports/" + encodeURIComponent(currentName);
+        a.className = "history-name";
+        a.textContent = origText;
+        input.replaceWith(a);
+      });
+    }
+
+    input.addEventListener("keydown", function(ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); doRename(); }
+      if (ev.key === "Escape") {
+        var a = document.createElement("a");
+        a.href = "/exports/" + encodeURIComponent(currentName);
+        a.className = "history-name";
+        a.textContent = origText;
+        input.replaceWith(a);
+      }
+    });
+    input.addEventListener("blur", doRename);
+  });
+
+  // Download handlers
+  li.querySelector(".dl-csv").addEventListener("click", function(e) {
+    e.preventDefault();
+    window.location.href = "/exports/" + encodeURIComponent(li.dataset.filename) + "/download/csv";
+  });
+  li.querySelector(".dl-xlsx").addEventListener("click", function(e) {
+    e.preventDefault();
+    window.location.href = "/exports/" + encodeURIComponent(li.dataset.filename) + "/download/xlsx";
+  });
+
+  // Preview handler (CSV only)
+  var previewBtn = li.querySelector(".preview");
+  if (previewBtn) {
+    previewBtn.addEventListener("click", function(e) {
+      e.preventDefault();
+      var fname = li.dataset.filename;
+      previewFilename = fname;
+      previewHasEdits = false;
+      previewSave.style.display = "none";
+      previewTitle.textContent = "預覽 — " + fname;
+      previewBody.innerHTML = '<div class="preview-loading">載入中...</div>';
+      previewOverlay.classList.add("active");
+      fetch("/exports/" + encodeURIComponent(fname) + "/preview")
+        .then(function(r) { if (!r.ok) throw new Error("載入失敗"); return r.json(); })
+        .then(function(data) {
+          if (!data.rows || data.rows.length === 0) {
+            previewBody.innerHTML = '<div class="preview-loading">此檔案沒有資料</div>';
+            return;
+          }
+          var headers = data.headers;
+          var editableFields = ["來文機關", "來文字號", "收文文號", "收文日期", "事由"];
+          var hint = '<div class="preview-edit-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>點擊欄位可直接編輯，拖曳左側把手可調整順序</div>';
+          var html = hint + '<table><thead><tr><th style="width:28px"></th>';
+          headers.forEach(function(h) { html += '<th>' + esc(h) + '</th>'; });
+          html += '<th style="width:32px"></th></tr></thead><tbody>';
+          data.rows.forEach(function(row, ri) {
+            html += '<tr data-ridx="' + ri + '">';
+            html += '<td class="drag-handle">' + GRIP_SVG + '</td>';
+            headers.forEach(function(h) {
+              var isEdit = editableFields.indexOf(h) >= 0;
+              var cls = h === "事由" ? "subject-col" : (h === "收文文號" || h === "收文日期" ? "mono-col" : "");
+              if (isEdit) cls += (cls ? " " : "") + "p-editable";
+              if (h === "工作項目編號") cls += (cls ? " " : "") + "row-num";
+              html += '<td' + (cls ? ' class="' + cls + '"' : '') + (isEdit ? ' contenteditable="true" data-field="' + h + '"' : '') + '>' + esc(row[h] || '') + '</td>';
+            });
+            html += '<td><button class="row-del" title="刪除此列">' + TRASH_SVG + '</button></td>';
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+          previewBody.innerHTML = html;
+          // Wire up delete buttons in preview
+          previewBody.querySelectorAll(".row-del").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+              btn.closest("tr").remove();
+              var pTb = previewBody.querySelector("tbody");
+              if (pTb) renumberRows(pTb);
+              if (!previewHasEdits) { previewHasEdits = true; previewSave.style.display = ""; }
+            });
+          });
+          // Track edits
+          previewBody.querySelectorAll("td.p-editable").forEach(function(td) {
+            var orig = td.textContent.trim();
+            td.addEventListener("input", function() {
+              var changed = td.textContent.trim() !== orig;
+              td.classList.toggle("p-edited", changed);
+              if (changed && !previewHasEdits) {
+                previewHasEdits = true;
+                previewSave.style.display = "";
+              }
+            });
+          });
+          // Setup drag reorder for preview table
+          var pTbody = previewBody.querySelector("tbody");
+          if (pTbody) {
+            setupDragReorder(pTbody, function() {
+              renumberRows(pTbody);
+              if (!previewHasEdits) { previewHasEdits = true; previewSave.style.display = ""; }
+            });
+          }
+        })
+        .catch(function(err) { previewBody.innerHTML = '<div class="preview-loading">' + esc(err.message) + '</div>'; });
+    });
+  }
+
+  // Delete handler
+  li.querySelector(".del").addEventListener("click", function(e) {
+    e.preventDefault();
+    var fname = li.dataset.filename;
+    if (!confirm("確定要刪除 " + fname + "？")) return;
+    fetch("/exports/" + encodeURIComponent(fname), { method: "DELETE" })
+      .then(function(resp) {
+        if (!resp.ok) throw new Error("刪除失敗");
+        li.remove();
+        if (!historyList.querySelector(".history-item")) {
+          historyEmpty.style.display = "";
+        }
+      })
+      .catch(function(err) { showError(err.message); });
+  });
+
+  return li;
+}
+
+function refreshHistory() {
+  fetch("/exports")
+    .then(function(r) { return r.json(); })
+    .then(function(files) {
+      historyList.querySelectorAll(".history-item").forEach(function(el) { el.remove(); });
+      if (files.length === 0) { historyEmpty.style.display = ""; } else {
+        historyEmpty.style.display = "none";
+        files.forEach(function(f) { historyList.appendChild(buildHistoryItem(f)); });
+      }
+      // Populate append dropdown with CSV files only
+      var csvFiles = files.filter(function(f) { return f.format === "CSV"; });
+      appendSelect.innerHTML = '<option value="">-- 選擇 CSV 檔案 --</option>';
+      csvFiles.forEach(function(f) {
+        var opt = document.createElement("option");
+        opt.value = f.filename;
+        opt.textContent = f.filename;
+        appendSelect.appendChild(opt);
+      });
+      // Show append section only if there are results and CSV files exist
+      if (resultsSection.classList.contains("active") && csvFiles.length > 0) {
+        appendSection.style.display = "";
+      } else {
+        appendSection.style.display = "none";
+      }
+    });
+}
+
+function doDownload(fmt) {
+  if (!currentToken) return;
+  var rows = collectRows();
+
+  fetch("/download/" + currentToken + "/" + fmt, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rows)
+  })
+  .then(function(resp) {
+    if (!resp.ok) throw new Error("下載失敗");
+    return resp.blob();
+  })
+  .then(function(blob) {
+    var ext = fmt === "xlsx" ? ".xlsx" : ".csv";
+    var dlName = "subject_output" + ext;
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = dlName;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showSuccess("匯出成功！已儲存 " + fmt.toUpperCase() + " 檔案至紀錄");
+    setTimeout(refreshHistory, 500);
+  })
+  .catch(function(err) { showError("匯出失敗：" + err.message); });
+}
+
+// Upload via AJAX
+submitBtn.addEventListener("click", function() {
+  if (!fileInput.files || fileInput.files.length === 0) {
+    showError("請選擇至少一張圖片");
+    return;
+  }
+  var formData = new FormData();
+  for (var i = 0; i < fileInput.files.length; i++) {
+    formData.append("files", fileInput.files[i]);
+  }
+  if (currentToken) formData.append("token", currentToken);
+
+  submitBtn.disabled = true;
+  processingMsg.classList.add("active");
+  errorMsg.classList.remove("active");
+
+  fetch("/upload", { method: "POST", body: formData })
+    .then(function(resp) {
+      if (!resp.ok) return resp.json().then(function(d) { throw new Error(d.error || "上傳失敗"); });
+      return resp.json();
+    })
+    .then(function(data) {
+      currentToken = data.token;
+      totalSkipped += data.skipped;
+      tbody.innerHTML = "";
+      data.rows.forEach(function(r) { tbody.appendChild(buildRow(r)); });
+      updateBadges(data.ok_count, data.partial_count, data.error_count, totalSkipped);
+      resultsSection.classList.add("active");
+      refreshHistory();  // update append dropdown
+      fileInput.value = "";
+      fileList.textContent = "";
+    })
+    .catch(function(err) { showError(err.message); })
+    .finally(function() {
+      submitBtn.disabled = false;
+      processingMsg.classList.remove("active");
+    });
+});
+
+downloadCsvBtn.addEventListener("click", function() { doDownload("csv"); });
+downloadXlsxBtn.addEventListener("click", function() { doDownload("xlsx"); });
+
+appendBtn.addEventListener("click", function() {
+  if (!currentToken) return;
+  var target = appendSelect.value;
+  if (!target) { showError("請先選擇要附加的 CSV 檔案"); return; }
+  var rows = collectRows();
+  appendBtn.disabled = true;
+
+  fetch("/download/" + currentToken + "/append", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target: target, rows: rows })
+  })
+  .then(function(resp) {
+    if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
+    return resp.json();
+  })
+  .then(function(data) {
+    if (data.all_duplicates) {
+      showError("附加失敗：所有資料皆已存在於 " + data.filename + "（重複收文文號：" + data.duplicates.join("、") + "）");
+    } else {
+      var msg = "附加成功！已新增至 " + data.filename + "（共 " + data.total_rows + " 筆）";
+      if (data.duplicates && data.duplicates.length > 0) {
+        msg += "，跳過 " + data.duplicates.length + " 筆重複（" + data.duplicates.join("、") + "）";
+      }
+      showSuccess(msg);
+    }
+    setTimeout(refreshHistory, 500);
+  })
+  .catch(function(err) { showError("附加失敗：" + err.message); })
+  .finally(function() { appendBtn.disabled = false; });
+});
+
+resetBtn.addEventListener("click", function() {
+  currentToken = null;
+  totalSkipped = 0;
+  tbody.innerHTML = "";
+  resultsSection.classList.remove("active");
+  appendSection.style.display = "none";
+  fileInput.value = "";
+  fileList.textContent = "";
+});
+
+// Preview modal close
+function closePreview() {
+  if (previewHasEdits && !confirm("有未儲存的修改，確定要關閉嗎？")) return;
+  previewOverlay.classList.remove("active");
+  previewHasEdits = false;
+}
+previewClose.addEventListener("click", closePreview);
+previewOverlay.addEventListener("click", function(e) {
+  if (e.target === previewOverlay) closePreview();
+});
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape" && previewOverlay.classList.contains("active")) closePreview();
+});
+
+// Collect rows from preview table
+function collectPreviewRows() {
+  var headers = ["工作項目編號", "原始檔名", "來文機關", "來文字號", "收文文號", "收文日期", "事由", "status"];
+  var trs = previewBody.querySelectorAll("tbody tr");
+  var rows = [];
+  trs.forEach(function(tr) {
+    var row = {};
+    var tds = tr.querySelectorAll("td:not(.drag-handle)");
+    tds.forEach(function(td, i) {
+      if (i < headers.length) {
+        var key = headers[i];
+        if (key === "原始檔名") row["original_filename"] = td.textContent.trim();
+        else row[key] = td.textContent.trim();
+      }
+    });
+    rows.push(row);
+  });
+  return rows;
+}
+
+// Save edits
+previewSave.addEventListener("click", function() {
+  if (!previewFilename) return;
+  var rows = collectPreviewRows();
+  previewSave.disabled = true;
+  fetch("/exports/" + encodeURIComponent(previewFilename) + "/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rows)
+  })
+  .then(function(r) { if (!r.ok) throw new Error("儲存失敗"); return r.json(); })
+  .then(function(data) {
+    showSuccess("儲存成功！已更新 " + previewFilename);
+    previewHasEdits = false;
+    previewSave.style.display = "none";
+    // Clear edited markers
+    previewBody.querySelectorAll("td.p-edited").forEach(function(td) { td.classList.remove("p-edited"); });
+    // Reset original values for edit tracking
+    previewBody.querySelectorAll("td.p-editable").forEach(function(td) {
+      var newOrig = td.textContent.trim();
+      td.replaceWith(td.cloneNode(true));
+    });
+    // Re-bind edit listeners
+    previewBody.querySelectorAll("td.p-editable").forEach(function(td) {
+      var orig = td.textContent.trim();
+      td.addEventListener("input", function() {
+        var changed = td.textContent.trim() !== orig;
+        td.classList.toggle("p-edited", changed);
+        if (changed && !previewHasEdits) {
+          previewHasEdits = true;
+          previewSave.style.display = "";
+        }
+      });
+    });
+    refreshHistory();
+  })
+  .catch(function(err) { showError("儲存失敗：" + err.message); })
+  .finally(function() { previewSave.disabled = false; });
+});
+
+// Preview download buttons
+previewDlCsv.addEventListener("click", function() {
+  if (!previewFilename) return;
+  window.location.href = "/exports/" + encodeURIComponent(previewFilename) + "/download/csv";
+});
+previewDlXlsx.addEventListener("click", function() {
+  if (!previewFilename) return;
+  window.location.href = "/exports/" + encodeURIComponent(previewFilename) + "/download/xlsx";
+});
+
+// ── Drag-and-drop row reordering ──
+function renumberRows(tbodyEl) {
+  var trs = tbodyEl.querySelectorAll("tr");
+  trs.forEach(function(tr, i) {
+    var dateCell = tr.querySelector('[data-field="收文日期"]');
+    var date = dateCell ? dateCell.textContent.trim() : "";
+    var datePart = "";
+    var parts = date.split(".");
+    if (parts.length >= 3) datePart = parts[1] + "." + parts[2];
+    var num = String(i + 1).padStart(3, "0");
+    var newId = datePart ? num + "_" + datePart : num;
+    var numCell = tr.querySelector(".row-num");
+    if (numCell) numCell.textContent = newId;
+  });
+}
+
+function setupDragReorder(tableBody, onReorder) {
+  var dragRow = null;
+  var handleClicked = false;
+
+  // Only make rows draggable when hovering the handle
+  tableBody.addEventListener("mouseover", function(e) {
+    var handle = e.target.closest(".drag-handle");
+    if (handle) {
+      var tr = handle.closest("tr");
+      if (tr) tr.draggable = true;
+    }
+  });
+  tableBody.addEventListener("mouseout", function(e) {
+    var handle = e.target.closest(".drag-handle");
+    if (handle) {
+      var tr = handle.closest("tr");
+      if (tr && !dragRow) tr.draggable = false;
+    }
+  });
+
+  // Track mousedown on handle to know if drag started from handle
+  tableBody.addEventListener("mousedown", function(e) {
+    handleClicked = !!e.target.closest(".drag-handle");
+  });
+
+  tableBody.addEventListener("dragstart", function(e) {
+    if (!handleClicked) { e.preventDefault(); return; }
+    var tr = e.target.closest("tr");
+    if (!tr) { e.preventDefault(); return; }
+    dragRow = tr;
+    tr.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", "");
+    // Needed for Firefox
+    if (e.dataTransfer.setDragImage) {
+      e.dataTransfer.setDragImage(tr, 0, 0);
+    }
+  });
+
+  tableBody.addEventListener("dragover", function(e) {
+    if (!dragRow) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    var tr = e.target.closest("tr");
+    if (!tr || tr === dragRow) return;
+    tableBody.querySelectorAll(".drag-over-above,.drag-over-below").forEach(function(el) {
+      el.classList.remove("drag-over-above", "drag-over-below");
+    });
+    var rect = tr.getBoundingClientRect();
+    if (e.clientY < rect.top + rect.height / 2) tr.classList.add("drag-over-above");
+    else tr.classList.add("drag-over-below");
+  });
+
+  tableBody.addEventListener("dragleave", function(e) {
+    var tr = e.target.closest("tr");
+    if (tr) tr.classList.remove("drag-over-above", "drag-over-below");
+  });
+
+  tableBody.addEventListener("drop", function(e) {
+    e.preventDefault();
+    tableBody.querySelectorAll(".drag-over-above,.drag-over-below").forEach(function(el) {
+      el.classList.remove("drag-over-above", "drag-over-below");
+    });
+    var tr = e.target.closest("tr");
+    if (!tr || !dragRow || tr === dragRow) return;
+    var rect = tr.getBoundingClientRect();
+    if (e.clientY < rect.top + rect.height / 2) tr.parentNode.insertBefore(dragRow, tr);
+    else tr.parentNode.insertBefore(dragRow, tr.nextSibling);
+    if (onReorder) onReorder();
+  });
+
+  tableBody.addEventListener("dragend", function() {
+    if (dragRow) {
+      dragRow.classList.remove("dragging");
+      dragRow.draggable = false;
+    }
+    dragRow = null;
+    handleClicked = false;
+    tableBody.querySelectorAll(".drag-over-above,.drag-over-below").forEach(function(el) {
+      el.classList.remove("drag-over-above", "drag-over-below");
+    });
+  });
+}
+
+// Set up drag for main results table
+setupDragReorder(tbody, function() { renumberRows(tbody); });
+
+// Load export history on page load
+refreshHistory();
+</script>
+</body>
+</html>

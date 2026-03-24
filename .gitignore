@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+*.csv
+images/
+.DS_Store
+API_key.env
+images.zip
