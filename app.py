@@ -285,8 +285,12 @@ def upload():
 
         for path, orig_name, file_hash in saved:
             try:
+                import time as _time
+                _t0 = _time.time()
                 subject, issue_date, laiwen_dept, doc_no, from_agency = ocrmod.process_one(path)
+                _t_ocr = _time.time() - _t0
                 status = "ok" if (subject and from_agency != "N/A" and doc_no and issue_date) else "partial"
+                print(f"[OCR] {orig_name} -> {status} ({_t_ocr:.1f}s)", flush=True)
 
                 # LLM fallback for partial results
                 if status == "partial":
@@ -303,7 +307,10 @@ def upload():
                         missing.append("收文日期")
 
                     if missing:
+                        print(f"[LLM] {orig_name} missing: {missing}", flush=True)
+                        _t1 = _time.time()
                         llm_data = _llm_extract(path, missing)
+                        print(f"[LLM] {orig_name} done ({_time.time() - _t1:.1f}s)", flush=True)
                         if llm_data:
                             if not subject and llm_data.get("事由"):
                                 subject = llm_data["事由"]
