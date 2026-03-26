@@ -70,4 +70,4 @@ echo ""
 (sleep 2 && open "http://127.0.0.1:5050") &
 
 # Start the app
-$PY app.py
+DEBUG=1 $PY app.py
