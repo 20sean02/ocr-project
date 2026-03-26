@@ -419,6 +419,12 @@
         <span class="badge badge-skip" id="badge-skip" style="display:none"></span>
       </div>
       <div class="right">
+        <button type="button" class="btn btn-sm" id="add-row-btn" style="background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+          </svg>
+          新增列
+        </button>
         <button type="button" class="btn btn-reset" id="reset-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
             <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/>
@@ -503,6 +509,12 @@
       <div class="preview-header">
         <h3 id="preview-title">預覽</h3>
         <div class="preview-actions">
+          <button class="btn btn-sm" id="preview-add-row" style="background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+            </svg>
+            新增列
+          </button>
           <button class="btn btn-download btn-sm" id="preview-save" style="display:none">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
@@ -551,6 +563,7 @@ var previewClose = document.getElementById("preview-close");
 var previewSave = document.getElementById("preview-save");
 var previewDlCsv = document.getElementById("preview-dl-csv");
 var previewDlXlsx = document.getElementById("preview-dl-xlsx");
+var previewAddRow = document.getElementById("preview-add-row");
 var previewFilename = "";  // track which file is being previewed
 var previewHasEdits = false;
 
@@ -1047,6 +1060,26 @@ appendBtn.addEventListener("click", function() {
   .finally(function() { appendBtn.disabled = false; });
 });
 
+document.getElementById("add-row-btn").addEventListener("click", function() {
+  var emptyRow = {
+    "工作項目編號": "",
+    "original_filename": "",
+    "來文機關": "",
+    "來文字號": "",
+    "收文文號": "",
+    "收文日期": "",
+    "事由": "",
+    "status": "manual",
+    "_file_hash": "",
+    "_image_file": ""
+  };
+  var tr = buildRow(emptyRow);
+  tbody.appendChild(tr);
+  renumberRows(tbody);
+  resultsSection.classList.add("active");
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
 resetBtn.addEventListener("click", function() {
   currentToken = null;
   totalSkipped = 0;
@@ -1140,6 +1173,44 @@ previewSave.addEventListener("click", function() {
   })
   .catch(function(err) { showError("儲存失敗：" + err.message); })
   .finally(function() { previewSave.disabled = false; });
+});
+
+// Preview add empty row
+previewAddRow.addEventListener("click", function() {
+  var pTbody = previewBody.querySelector("tbody");
+  if (!pTbody) return;
+  // Read headers from table
+  var thCells = previewBody.querySelectorAll("thead th");
+  var headers = [];
+  thCells.forEach(function(th) { var t = th.textContent.trim(); if (t) headers.push(t); });
+  var editableFields = ["來文機關", "來文字號", "收文文號", "收文日期", "事由"];
+  var tr = document.createElement("tr");
+  tr.innerHTML = '<td class="drag-handle">' + GRIP_SVG + '</td>';
+  headers.forEach(function(h) {
+    var isEdit = editableFields.indexOf(h) >= 0;
+    var cls = h === "事由" ? "subject-col" : (h === "收文文號" || h === "收文日期" ? "mono-col" : "");
+    if (isEdit) cls += (cls ? " " : "") + "p-editable";
+    if (h === "工作項目編號") cls += (cls ? " " : "") + "row-num";
+    tr.innerHTML += '<td' + (cls ? ' class="' + cls + '"' : '') + (isEdit ? ' contenteditable="true" data-field="' + h + '"' : '') + '></td>';
+  });
+  tr.innerHTML += '<td><button class="row-del" title="刪除此列">' + TRASH_SVG + '</button></td>';
+  pTbody.appendChild(tr);
+  // Wire delete button
+  tr.querySelector(".row-del").addEventListener("click", function() {
+    tr.remove();
+    renumberRows(pTbody);
+    if (!previewHasEdits) { previewHasEdits = true; previewSave.style.display = ""; }
+  });
+  // Wire edit tracking
+  tr.querySelectorAll("td.p-editable").forEach(function(td) {
+    td.addEventListener("input", function() {
+      if (!previewHasEdits) { previewHasEdits = true; previewSave.style.display = ""; }
+    });
+  });
+  renumberRows(pTbody);
+  if (!previewHasEdits) { previewHasEdits = true; previewSave.style.display = ""; }
+  // Scroll to new row
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
 // Preview download buttons
