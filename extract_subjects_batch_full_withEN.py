@@ -99,7 +99,9 @@ def format_work_item_id(seq: int, date_str: Optional[str]) -> str:
 # =========================================================
 def read_and_prepare(image_path: str, max_dim: int = 1800) -> np.ndarray:
     """Return raw grayscale image (no blur applied)."""
-    img = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    with open(image_path, "rb") as fh:
+        raw = fh.read()
+    img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
 
