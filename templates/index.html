@@ -382,13 +382,13 @@
     </div>
     <div class="file-list" id="file-list"></div>
     <div style="margin-top:12px; padding:12px 16px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-      <label style="font-size:0.85rem; font-weight:600; white-space:nowrap; color:var(--text-dim);">或匯入已有 CSV：</label>
-      <input type="file" accept=".csv" id="csv-import-input" style="display:none">
+      <label style="font-size:0.85rem; font-weight:600; white-space:nowrap; color:var(--text-dim);">或匯入已有 CSV / Excel：</label>
+      <input type="file" accept=".csv,.xlsx" id="csv-import-input" style="display:none">
       <button type="button" class="btn btn-sm" id="csv-import-btn" style="background:var(--surface); border:1px solid var(--border); color:var(--text-dim);">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
         </svg>
-        選擇 CSV 檔案
+        選擇檔案
       </button>
       <span id="csv-import-name" style="font-size:0.82rem; color:var(--accent);"></span>
     </div>
@@ -925,11 +925,13 @@ function doDownload(fmt) {
 
 // Upload via AJAX — one image at a time (cancellable)
 var cancelRequested = false;
+var currentAbort = null;
 var cancelBtn = document.getElementById("cancel-btn");
 var progressText = document.getElementById("progress-text");
 
 cancelBtn.addEventListener("click", function() {
   cancelRequested = true;
+  if (currentAbort) currentAbort.abort();
   cancelBtn.disabled = true;
   cancelBtn.textContent = "正在取消...";
 });
@@ -943,6 +945,7 @@ submitBtn.addEventListener("click", async function() {
   var total = files.length;
   var skippedCount = 0;
   cancelRequested = false;
+  currentAbort = null;
 
   submitBtn.disabled = true;
   cancelBtn.style.display = "";
@@ -962,7 +965,8 @@ submitBtn.addEventListener("click", async function() {
     if (currentToken) formData.append("token", currentToken);
 
     try {
-      var resp = await fetch("/upload_one", { method: "POST", body: formData });
+      currentAbort = new AbortController();
+      var resp = await fetch("/upload_one", { method: "POST", body: formData, signal: currentAbort.signal });
       if (!resp.ok) {
         var d = await resp.json();
         throw new Error(d.error || "上傳失敗");
@@ -975,9 +979,11 @@ submitBtn.addEventListener("click", async function() {
         resultsSection.classList.add("active");
       }
     } catch (err) {
+      if (err.name === "AbortError") break;
       showError(files[i].name + "：" + err.message);
     }
   }
+  currentAbort = null;
 
   // Fetch final sorted/renumbered rows
   if (currentToken) {
@@ -1067,18 +1073,29 @@ document.addEventListener("keydown", function(e) {
 
 // Collect rows from preview table
 function collectPreviewRows() {
-  var headers = ["工作項目編號", "原始檔名", "來文機關", "來文字號", "收文文號", "收文日期", "事由", "status"];
+  // Read headers from the actual table header row
+  var thCells = previewBody.querySelectorAll("thead th");
+  var headers = [];
+  thCells.forEach(function(th) {
+    var t = th.textContent.trim();
+    if (t) headers.push(t);
+  });
   var trs = previewBody.querySelectorAll("tbody tr");
   var rows = [];
   trs.forEach(function(tr) {
     var row = {};
+    // Get only data cells (skip drag handle and delete button)
     var tds = tr.querySelectorAll("td:not(.drag-handle)");
-    tds.forEach(function(td, i) {
-      if (i < headers.length) {
-        var key = headers[i];
+    var dataIdx = 0;
+    tds.forEach(function(td) {
+      // Skip the delete button cell
+      if (td.querySelector(".row-del")) return;
+      if (dataIdx < headers.length) {
+        var key = headers[dataIdx];
         if (key === "原始檔名") row["original_filename"] = td.textContent.trim();
         else row[key] = td.textContent.trim();
       }
+      dataIdx++;
     });
     rows.push(row);
   });
@@ -1275,7 +1292,7 @@ csvImportInput.addEventListener("change", function() {
     .catch(function(err) { showError("匯入失敗：" + err.message); })
     .finally(function() {
       csvImportBtn.disabled = false;
-      csvImportBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg> 選擇 CSV 檔案';
+      csvImportBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg> 選擇檔案';
       csvImportInput.value = "";
       csvImportName.textContent = "";
     });

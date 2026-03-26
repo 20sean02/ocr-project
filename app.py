@@ -10,7 +10,7 @@ from datetime import datetime
 
 from flask import Flask, request, render_template, send_file, jsonify
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 import extract_subjects_batch_full_withEN as ocrmod
@@ -163,6 +163,33 @@ def _read_csv_file(path):
     return rows
 
 
+def _read_xlsx_file(path):
+    """Read an XLSX export file and return list of row dicts."""
+    wb = load_workbook(path, read_only=True)
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    headers = next(rows_iter, None)
+    if not headers:
+        wb.close()
+        return []
+    headers = [str(h).strip() if h else "" for h in headers]
+    rows = []
+    for vals in rows_iter:
+        r = {h: (str(v).strip() if v is not None else "") for h, v in zip(headers, vals)}
+        rows.append({
+            "工作項目編號": r.get("工作項目編號", ""),
+            "original_filename": r.get("原始檔名", ""),
+            "來文機關": r.get("來文機關", "N/A"),
+            "來文字號": r.get("來文字號", "N/A"),
+            "收文文號": r.get("收文文號", ""),
+            "收文日期": r.get("收文日期", ""),
+            "事由": r.get("事由", ""),
+            "status": r.get("status", ""),
+        })
+    wb.close()
+    return rows
+
+
 # ── Routes ─────────────────────────────────────────────────────
 
 @app.route("/", methods=["GET"])
@@ -183,9 +210,13 @@ def serve_image(filename):
 def upload_one():
     """Process a single image. The frontend calls this once per file so the
     user can cancel between images."""
+    ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
     f = request.files.get("file")
     if not f or f.filename == "":
         return jsonify({"error": "缺少圖片"}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in ALLOWED_EXT:
+        return jsonify({"error": f"不支援的檔案格式：{ext}，請上傳圖片檔"}), 400
 
     token = request.form.get("token", "").strip()
     if not token or token not in RESULTS:
@@ -259,6 +290,19 @@ def upload_one():
     return jsonify({"token": token, "skipped": False, "row": _safe_row(row)})
 
 
+def _cleanup_images(rows):
+    """Delete image files associated with rows."""
+    for r in rows:
+        img = r.get("_image_file")
+        if img:
+            path = os.path.join(IMAGES_DIR, img)
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+
 def _safe_row(r):
     """Return a row dict safe for JSON (no tuple sort keys)."""
     return {
@@ -322,6 +366,7 @@ def download_csv(token):
 
     csv_data = _rows_to_csv(rows)
     _save_export(rows, token, "csv")
+    _cleanup_images(rows)
 
     buf = io.BytesIO(csv_data.encode("utf-8-sig"))
     return send_file(buf, as_attachment=True, download_name="subject_output.csv", mimetype="text/csv")
@@ -334,6 +379,7 @@ def download_xlsx(token):
         return "結果已過期，請重新上傳辨識", 404
 
     _save_export(rows, token, "xlsx")
+    _cleanup_images(rows)
     buf = _rows_to_xlsx(rows)
 
     return send_file(
@@ -398,6 +444,8 @@ def download_append(token):
     csv_data = _rows_to_csv(existing)
     with open(target_path, "w", encoding="utf-8-sig", newline="") as f:
         f.write(csv_data)
+
+    _cleanup_images(edited_rows)
 
     return jsonify({
         "ok": True,
@@ -547,35 +595,48 @@ def rename_export(filename):
 
 @app.route("/import_csv", methods=["POST"])
 def import_csv():
-    """Import a previously exported CSV to restore session data."""
+    """Import a previously exported CSV or XLSX to restore session data."""
     f = request.files.get("file")
     if not f or f.filename == "":
-        return jsonify({"error": "缺少 CSV 檔案"}), 400
-    if not f.filename.lower().endswith(".csv"):
-        return jsonify({"error": "只支援 CSV 檔案"}), 400
+        return jsonify({"error": "缺少檔案"}), 400
+    fname = f.filename.lower()
+    if not fname.endswith((".csv", ".xlsx")):
+        return jsonify({"error": "只支援 CSV / XLSX 檔案"}), 400
 
     try:
-        content = f.read().decode("utf-8-sig")
-        reader = csv.DictReader(io.StringIO(content))
+        if fname.endswith(".xlsx"):
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            f.save(tmp.name)
+            tmp.close()
+            raw_rows = _read_xlsx_file(tmp.name)
+            os.unlink(tmp.name)
+        else:
+            content = f.read().decode("utf-8-sig")
+            reader = csv.DictReader(io.StringIO(content))
+            raw_rows = []
+            for r in reader:
+                raw_rows.append({
+                    "工作項目編號": r.get("工作項目編號", ""),
+                    "original_filename": r.get("原始檔名", ""),
+                    "來文機關": r.get("來文機關", "N/A"),
+                    "來文字號": r.get("來文字號", "N/A"),
+                    "收文文號": r.get("收文文號", ""),
+                    "收文日期": r.get("收文日期", ""),
+                    "事由": r.get("事由", ""),
+                    "status": r.get("status", "imported"),
+                })
+
         rows = []
-        for r in reader:
-            row = {
-                "工作項目編號": r.get("工作項目編號", ""),
-                "original_filename": r.get("原始檔名", ""),
-                "來文機關": r.get("來文機關", "N/A"),
-                "來文字號": r.get("來文字號", "N/A"),
-                "收文文號": r.get("收文文號", ""),
-                "收文日期": r.get("收文日期", ""),
-                "事由": r.get("事由", ""),
-                "status": r.get("status", "imported"),
-                "_sort_key": ocrmod.parse_roc_date_to_sort_key(r.get("收文日期", "")),
-                "_file_hash": "",
-                "_image_file": "",
-            }
-            rows.append(row)
+        for r in raw_rows:
+            r["status"] = r.get("status") or "imported"
+            r["_sort_key"] = ocrmod.parse_roc_date_to_sort_key(r.get("收文日期", ""))
+            r["_file_hash"] = ""
+            r["_image_file"] = ""
+            rows.append(r)
 
         if not rows:
-            return jsonify({"error": "CSV 檔案沒有資料"}), 400
+            return jsonify({"error": "檔案沒有資料"}), 400
 
         token = uuid.uuid4().hex[:12]
         _sort_and_renumber(rows)
@@ -584,7 +645,7 @@ def import_csv():
         safe_rows = [_safe_row(r) for r in rows]
         return jsonify({"token": token, "rows": safe_rows, "count": len(rows)})
     except Exception as e:
-        return jsonify({"error": f"讀取 CSV 失敗：{e}"}), 400
+        return jsonify({"error": f"讀取檔案失敗：{e}"}), 400
 
 
 if __name__ == "__main__":
