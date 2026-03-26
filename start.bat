@@ -74,3 +74,8 @@ start "" http://127.0.0.1:5050
 
 :: Start the app
 python app.py
+if %errorlevel% neq 0 (
+    echo.
+    echo [錯誤] 程式異常結束
+)
+pause
