@@ -58,7 +58,13 @@ call .venv\Scripts\activate.bat
 
 :: Install dependencies
 echo Installing packages...
-pip install -q -r requirements.txt 2>nul
+pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Failed to install packages
+    pause
+    exit /b 1
+)
 
 echo.
 echo Starting server...
