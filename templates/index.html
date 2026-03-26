@@ -712,7 +712,10 @@ function buildHistoryItem(f) {
     var dotIdx = input.value.lastIndexOf(".");
     if (dotIdx > 0) input.setSelectionRange(0, dotIdx);
 
+    var renaming = false;
     function doRename() {
+      if (renaming) return;
+      renaming = true;
       var newName = input.value.trim();
       if (!newName || newName === origText) {
         // Cancel — restore link

@@ -1007,10 +1007,8 @@ def process_one(image_path: str) -> Tuple[Optional[str], Optional[str], str, Opt
         if from_agency == "N/A":
             from_agency = infer_agency_from_fawenzihao(full_text)
 
-    # Annotate agency with document type for 通報
-    if is_tongbao and from_agency != "N/A":
-        from_agency = f"{from_agency}(通報)"
-    elif is_tongbao:
+    # For 通報 documents, just use "通報" as agency
+    if is_tongbao:
         from_agency = "通報"
 
     return subject, issue_date, laiwen_dept, doc_no, from_agency

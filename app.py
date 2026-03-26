@@ -30,16 +30,14 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 IMAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
-HEADERS = ["工作項目編號", "原始檔名", "來文機關", "來文字號", "收文文號", "收文日期", "事由", "status"]
+HEADERS = ["工作項目編號", "來文機關", "來文字號", "收文文號", "收文日期", "事由"]
 FIELD_MAP = [
     ("工作項目編號", "工作項目編號"),
-    ("original_filename", "原始檔名"),
     ("來文機關", "來文機關"),
     ("來文字號", "來文字號"),
     ("收文文號", "收文文號"),
     ("收文日期", "收文日期"),
     ("事由", "事由"),
-    ("status", "status"),
 ]
 
 
