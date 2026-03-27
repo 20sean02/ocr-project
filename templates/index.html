@@ -755,6 +755,7 @@ function buildHistoryItem(f) {
         a.className = "history-name";
         a.textContent = data.new_name;
         input.replaceWith(a);
+        refreshHistory();
       })
       .catch(function(err) {
         showError("重新命名失敗: " + err.message);
@@ -875,6 +876,7 @@ function buildHistoryItem(f) {
         if (!historyList.querySelector(".history-item")) {
           historyEmpty.style.display = "";
         }
+        refreshHistory();
       })
       .catch(function(err) { showError(err.message); });
   });
@@ -911,26 +913,31 @@ function refreshHistory() {
 
 function doDownload(fmt) {
   if (!currentToken) return;
+  var ext = fmt === "xlsx" ? ".xlsx" : ".csv";
+  var defaultName = "subject_output" + ext;
+  var userInput = prompt("請輸入檔案名稱：", defaultName);
+  if (userInput === null) return; // cancelled
+  var fileName = userInput.trim() || defaultName;
+  if (!fileName.endsWith(ext)) fileName = fileName.replace(/\.(csv|xlsx)$/i, "") + ext;
+
   var rows = collectRows();
 
   fetch("/download/" + currentToken + "/" + fmt, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(rows)
+    body: JSON.stringify({ rows: rows, filename: fileName })
   })
   .then(function(resp) {
     if (!resp.ok) throw new Error("下載失敗");
     return resp.blob();
   })
   .then(function(blob) {
-    var ext = fmt === "xlsx" ? ".xlsx" : ".csv";
-    var dlName = "subject_output" + ext;
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
-    a.href = url; a.download = dlName;
+    a.href = url; a.download = fileName;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    showSuccess("匯出成功！已儲存 " + fmt.toUpperCase() + " 檔案至紀錄");
+    showSuccess("匯出成功！已儲存 " + fileName + " 至紀錄");
     setTimeout(refreshHistory, 500);
   })
   .catch(function(err) { showError("匯出失敗：" + err.message); });

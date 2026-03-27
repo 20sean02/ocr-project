@@ -103,10 +103,17 @@ def _rows_to_xlsx(rows):
 
 # ── Export helpers ──────────────────────────────────────────────
 
-def _save_export(rows, token, fmt):
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+def _save_export(rows, token, fmt, custom_name=None):
     ext = {"csv": ".csv", "xlsx": ".xlsx"}.get(fmt, ".csv")
-    filename = f"export_{ts}_{token}{ext}"
+    if custom_name:
+        # Sanitize and ensure correct extension
+        custom_name = os.path.basename(custom_name).strip()
+        if not custom_name.endswith(ext):
+            custom_name = os.path.splitext(custom_name)[0] + ext
+        filename = custom_name
+    else:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"export_{ts}_{token}{ext}"
     path = os.path.join(EXPORT_DIR, filename)
 
     if fmt == "xlsx":
@@ -338,12 +345,23 @@ def get_rows(token):
 
 
 def _get_edited_rows(token):
-    """Extract edited rows from request, update caches."""
+    """Extract edited rows and optional filename from request, update caches."""
     stored_rows = RESULTS.get(token)
     if stored_rows is None:
-        return None
+        return None, None
 
-    edited = request.get_json(silent=True)
+    data = request.get_json(silent=True)
+    custom_name = None
+
+    # Accept both {rows: [...], filename: "..."} and plain [...]
+    if data and isinstance(data, dict):
+        edited = data.get("rows")
+        custom_name = data.get("filename")
+    elif data and isinstance(data, list):
+        edited = data
+    else:
+        edited = None
+
     if edited and isinstance(edited, list):
         rows = edited
         for edited_row, stored_row in zip(edited, stored_rows):
@@ -355,36 +373,42 @@ def _get_edited_rows(token):
         RESULTS[token] = edited
     else:
         rows = stored_rows
-    return rows
+    return rows, custom_name
 
 
 @app.route("/download/<token>/csv", methods=["POST"])
 def download_csv(token):
-    rows = _get_edited_rows(token)
+    rows, custom_name = _get_edited_rows(token)
     if rows is None:
         return "結果已過期，請重新上傳辨識", 404
 
     csv_data = _rows_to_csv(rows)
-    _save_export(rows, token, "csv")
+    _save_export(rows, token, "csv", custom_name)
     _cleanup_images(rows)
 
+    dl_name = custom_name or "subject_output.csv"
+    if not dl_name.endswith(".csv"):
+        dl_name = os.path.splitext(dl_name)[0] + ".csv"
     buf = io.BytesIO(csv_data.encode("utf-8-sig"))
-    return send_file(buf, as_attachment=True, download_name="subject_output.csv", mimetype="text/csv")
+    return send_file(buf, as_attachment=True, download_name=dl_name, mimetype="text/csv")
 
 
 @app.route("/download/<token>/xlsx", methods=["POST"])
 def download_xlsx(token):
-    rows = _get_edited_rows(token)
+    rows, custom_name = _get_edited_rows(token)
     if rows is None:
         return "結果已過期，請重新上傳辨識", 404
 
-    _save_export(rows, token, "xlsx")
+    _save_export(rows, token, "xlsx", custom_name)
     _cleanup_images(rows)
+    dl_name = custom_name or "subject_output.xlsx"
+    if not dl_name.endswith(".xlsx"):
+        dl_name = os.path.splitext(dl_name)[0] + ".xlsx"
     buf = _rows_to_xlsx(rows)
 
     return send_file(
         buf, as_attachment=True,
-        download_name="subject_output.xlsx",
+        download_name=dl_name,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
