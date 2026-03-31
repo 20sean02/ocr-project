@@ -217,7 +217,7 @@ def serve_image(filename):
 def upload_one():
     """Process a single image. The frontend calls this once per file so the
     user can cancel between images."""
-    ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+    ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif"}
     f = request.files.get("file")
     if not f or f.filename == "":
         return jsonify({"error": "缺少圖片"}), 400
@@ -254,6 +254,22 @@ def upload_one():
     save_name = f"{file_hash[:10]}_{orig}"
     save_path = os.path.join(IMAGES_DIR, save_name)
     f.save(save_path)
+
+    # Convert HEIC/HEIF to JPEG for OCR compatibility
+    if ext in (".heic", ".heif"):
+        try:
+            from pillow_heif import open_heif
+            from PIL import Image
+            heif_img = open_heif(save_path)
+            img = Image.frombytes(heif_img.mode, heif_img.size, heif_img.data)
+            jpg_name = os.path.splitext(save_name)[0] + ".jpg"
+            jpg_path = os.path.join(IMAGES_DIR, jpg_name)
+            img.save(jpg_path, "JPEG", quality=95)
+            os.remove(save_path)
+            save_name = jpg_name
+            save_path = jpg_path
+        except Exception as e:
+            return jsonify({"error": f"HEIC 轉換失敗：{e}"}), 400
 
     # Process with OCR
     try:

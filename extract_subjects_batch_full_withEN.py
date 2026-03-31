@@ -541,6 +541,9 @@ def extract_subject(ocr_text: str) -> Optional[str]:
     start = None
     for i, ln in enumerate(lines):
         ln_ns = ln.replace(" ", "")
+        # Skip 主旨 that appears inside 附件 context (e.g. "附件：如主旨", "附件如主旨")
+        if re.search(r"附\s*件", ln_ns) and _ZHI_FIND.search(ln_ns):
+            continue
         if _ZHI_FIND.search(ln_ns):
             start = i
             break
